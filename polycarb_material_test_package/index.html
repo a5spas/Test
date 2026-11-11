@@ -44,31 +44,42 @@ const presets={
  solar:{label:'Solar',color:0xe2e5e5,transmission:.68,roughness:.48,ior:1.5,thickness:.12,attenuationColor:0xd7dce0,attenuationDistance:.65,metalness:0}
 };
 function makeMaterial(p){return new THREE.MeshPhysicalMaterial({color:p.color,metalness:p.metalness,roughness:p.roughness,transmission:p.transmission,ior:p.ior,thickness:p.thickness,attenuationColor:p.attenuationColor??0xffffff,attenuationDistance:p.attenuationDistance??10,side:THREE.DoubleSide,transparent:p.transmission>0,opacity:1,depthWrite:p.transmission===0});}
-// Procedural fine vertical fluting for the polycarbonate surface.
-// Generated in the browser; no additional texture image is required.
-function makeVerticalFluteTexture(){
-  const canvas=document.createElement('canvas'); canvas.width=512; canvas.height=512;
-  const ctx=canvas.getContext('2d');
-  ctx.fillStyle='#888888'; ctx.fillRect(0,0,512,512);
-  for(let x=0;x<512;x+=16){
-    ctx.fillStyle='#b8b8b8'; ctx.fillRect(x,0,5,512);
-    ctx.fillStyle='#555555'; ctx.fillRect(x+6,0,3,512);
-    ctx.fillStyle='#858585'; ctx.fillRect(x+9,0,7,512);
-  }
-  const tex=new THREE.CanvasTexture(canvas);
-  tex.wrapS=THREE.RepeatWrapping; tex.wrapT=THREE.RepeatWrapping;
-  tex.colorSpace=THREE.NoColorSpace;
-  tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
-  return tex;
+
+// Procedural vertical polycarbonate ribs.
+// The GLB sidewall lies in the XY plane, with Y as vertical, so the ribs
+// run along Y and repeat across X. This avoids depending on the model's UV layout.
+function addVerticalRibs(material, finishKey){
+  const spacing = 2.6; // model units between ribs; adjust after viewing the live model
+  const strength = finishKey==='clear' ? 0.10 : (finishKey==='opaque' ? 0.16 : 0.13);
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      '#include <common>\nvarying float vPolyRibX;'
+    );
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      '#include <begin_vertex>\nvPolyRibX = position.x;'
+    );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      '#include <common>\nvarying float vPolyRibX;'
+    );
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+       float ribPhase = fract((vPolyRibX + 120.0) / ${spacing.toFixed(2)});
+       float ribLine = smoothstep(0.34, 0.46, ribPhase) * (1.0 - smoothstep(0.54, 0.66, ribPhase));
+       float ribShade = mix(1.0 - ${strength.toFixed(3)}, 1.0, ribLine);
+       diffuseColor.rgb *= ribShade;`
+    );
+  };
+  material.customProgramCacheKey = () => `polycarb-vertical-ribs-${finishKey}-v2`;
+  material.needsUpdate = true;
 }
-const fluteTexture=makeVerticalFluteTexture();
 const mats={};
 for(const [k,p] of Object.entries(presets)){
   mats[k]=makeMaterial(p);
-  mats[k].bumpMap=fluteTexture;
-  mats[k].bumpScale=k==='clear'?0.004:(k==='opaque'?0.012:0.009);
-  mats[k].roughnessMap=fluteTexture;
-  mats[k].needsUpdate=true;
+  addVerticalRibs(mats[k], k);
 }
 function setFinish(key){const p=presets[key];for(const entry of polyMeshes){const next=entry.originalMaterials.slice();for(const index of entry.polyIndices)next[index]=mats[key];entry.mesh.material=entry.wasArray?next:next[0];}document.querySelectorAll('#buttons button').forEach(b=>b.classList.toggle('active',b.dataset.finish===key));document.getElementById('readout').innerHTML=`<b>${p.label}</b><br>Transmission: ${p.transmission.toFixed(2)} · Roughness: ${p.roughness.toFixed(2)} · IOR: ${p.ior.toFixed(1)}`;status.textContent=`Finish: ${p.label}`;}
 document.querySelectorAll('#buttons button').forEach(b=>b.addEventListener('click',()=>setFinish(b.dataset.finish)));
