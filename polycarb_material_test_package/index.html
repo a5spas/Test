@@ -45,45 +45,62 @@ const presets={
 };
 function makeMaterial(p){return new THREE.MeshPhysicalMaterial({color:p.color,metalness:p.metalness,roughness:p.roughness,transmission:p.transmission,ior:p.ior,thickness:p.thickness,attenuationColor:p.attenuationColor??0xffffff,attenuationDistance:p.attenuationDistance??10,side:THREE.DoubleSide,transparent:p.transmission>0,opacity:1,depthWrite:p.transmission===0});}
 
-// Procedural vertical polycarbonate ribs.
-// The GLB sidewall lies in the XY plane, with Y as vertical, so the ribs
-// run along Y and repeat across X. This avoids depending on the model's UV layout.
-function addVerticalRibs(material, finishKey){
-  const spacing = 2.6; // model units between ribs; adjust after viewing the live model
-  const strength = finishKey==='clear' ? 0.10 : (finishKey==='opaque' ? 0.16 : 0.13);
-  material.onBeforeCompile = (shader) => {
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <common>',
-      '#include <common>\nvarying float vPolyRibX;'
-    );
-    shader.vertexShader = shader.vertexShader.replace(
-      '#include <begin_vertex>',
-      '#include <begin_vertex>\nvPolyRibX = position.x;'
-    );
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <common>',
-      '#include <common>\nvarying float vPolyRibX;'
-    );
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <color_fragment>',
-      `#include <color_fragment>
-       float ribPhase = fract((vPolyRibX + 120.0) / ${spacing.toFixed(2)});
-       float ribLine = smoothstep(0.34, 0.46, ribPhase) * (1.0 - smoothstep(0.54, 0.66, ribPhase));
-       float ribShade = mix(1.0 - ${strength.toFixed(3)}, 1.0, ribLine);
-       diffuseColor.rgb *= ribShade;`
-    );
-  };
-  material.customProgramCacheKey = () => `polycarb-vertical-ribs-${finishKey}-v2`;
-  material.needsUpdate = true;
+
+// Procedural vertical rib map. The GLB's clear panel has no UV channel, so we
+// generate planar UVs from its local X/Y coordinates and apply a real bump map.
+function makeRibMap(){
+  const canvas=document.createElement('canvas');
+  canvas.width=1024; canvas.height=256;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='rgb(128,128,128)'; ctx.fillRect(0,0,canvas.width,canvas.height);
+  // 52 fine vertical flutes across the texture. Alternating light/dark edges
+  // create a subtle embossed profile when used as a bump map.
+  const pitch=canvas.width/52;
+  for(let i=0;i<52;i++){
+    const x=i*pitch;
+    ctx.fillStyle='rgb(178,178,178)'; ctx.fillRect(x,0,pitch*0.18,canvas.height);
+    ctx.fillStyle='rgb(105,105,105)'; ctx.fillRect(x+pitch*0.22,0,pitch*0.18,canvas.height);
+    ctx.fillStyle='rgb(145,145,145)'; ctx.fillRect(x+pitch*0.40,0,pitch*0.60,canvas.height);
+  }
+  const tex=new THREE.CanvasTexture(canvas);
+  tex.colorSpace=THREE.NoColorSpace;
+  tex.wrapS=THREE.RepeatWrapping; tex.wrapT=THREE.RepeatWrapping;
+  tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
+  tex.needsUpdate=true;
+  return tex;
 }
+const ribMap=makeRibMap();
+
+function ensurePanelUVs(mesh){
+  const g=mesh.geometry;
+  const pos=g.attributes.position;
+  if(!pos) return;
+  // Map local X across the panel and local Y vertically. UVs are generated
+  // for every vertex, so this works even when the original GLB has no UVs.
+  const box=new THREE.Box3().setFromBufferAttribute(pos);
+  const size=box.getSize(new THREE.Vector3());
+  const uvs=new Float32Array(pos.count*2);
+  for(let i=0;i<pos.count;i++){
+    const x=pos.getX(i), y=pos.getY(i);
+    uvs[i*2]=(x-box.min.x)/Math.max(size.x,1e-6);
+    uvs[i*2+1]=(y-box.min.y)/Math.max(size.y,1e-6);
+  }
+  g.setAttribute('uv',new THREE.BufferAttribute(uvs,2));
+}
+
 const mats={};
 for(const [k,p] of Object.entries(presets)){
   mats[k]=makeMaterial(p);
-  addVerticalRibs(mats[k], k);
+  mats[k].bumpMap=ribMap;
+  mats[k].bumpScale=k==='clear'?0.035:(k==='opaque'?0.055:0.045);
+  // A very subtle roughness variation helps catch highlights along each flute.
+  mats[k].roughnessMap=ribMap;
+  mats[k].roughness=Math.max(p.roughness,0.18);
+  mats[k].needsUpdate=true;
 }
 function setFinish(key){const p=presets[key];for(const entry of polyMeshes){const next=entry.originalMaterials.slice();for(const index of entry.polyIndices)next[index]=mats[key];entry.mesh.material=entry.wasArray?next:next[0];}document.querySelectorAll('#buttons button').forEach(b=>b.classList.toggle('active',b.dataset.finish===key));document.getElementById('readout').innerHTML=`<b>${p.label}</b><br>Transmission: ${p.transmission.toFixed(2)} · Roughness: ${p.roughness.toFixed(2)} · IOR: ${p.ior.toFixed(1)}`;status.textContent=`Finish: ${p.label}`;}
 document.querySelectorAll('#buttons button').forEach(b=>b.addEventListener('click',()=>setFinish(b.dataset.finish)));
-new GLTFLoader().load('./polycarb_clear.glb',gltf=>{root=gltf.scene;scene.add(root);root.traverse(o=>{if(!o.isMesh)return;const originalMaterials=Array.isArray(o.material)?o.material.slice():[o.material];const polyIndices=[];originalMaterials.forEach((m,i)=>{if(m&&/glass_clear|polycarb/i.test(m.name))polyIndices.push(i);});if(polyIndices.length){polyMeshes.push({mesh:o,originalMaterials,polyIndices,wasArray:Array.isArray(o.material)});const initial=originalMaterials.slice();for(const index of polyIndices)initial[index]=mats.clear;o.material=Array.isArray(o.material)?initial:initial[0];}});const box=new THREE.Box3().setFromObject(root);const size=box.getSize(new THREE.Vector3());const center=box.getCenter(new THREE.Vector3());root.position.sub(center);const maxDim=Math.max(size.x,size.y,size.z);camera.position.set(maxDim*1.8,maxDim*1.2,maxDim*2.2);camera.near=maxDim/1000;camera.far=maxDim*100;camera.updateProjectionMatrix();controls.target.set(0,0,0);controls.update();if(!polyMeshes.length){status.textContent='Model loaded, but no glass_clear material was found';}else{status.textContent=`Loaded · ${polyMeshes.length} polycarbonate mesh(es)`;}loading.style.display='none';setFinish('clear');},xhr=>{if(xhr.total)status.textContent=`Loading ${Math.round(xhr.loaded/xhr.total*100)}%`;},err=>{loading.textContent='Could not load GLB. Run this folder from a local web server or GitHub Pages.';status.textContent='Model loading failed';console.error(err);});
+new GLTFLoader().load('./polycarb_clear.glb',gltf=>{root=gltf.scene;scene.add(root);root.traverse(o=>{if(!o.isMesh)return;const originalMaterials=Array.isArray(o.material)?o.material.slice():[o.material];const polyIndices=[];originalMaterials.forEach((m,i)=>{if(m&&/glass_clear|polycarb/i.test(m.name))polyIndices.push(i);});if(polyIndices.length){ensurePanelUVs(o);polyMeshes.push({mesh:o,originalMaterials,polyIndices,wasArray:Array.isArray(o.material)});const initial=originalMaterials.slice();for(const index of polyIndices)initial[index]=mats.clear;o.material=Array.isArray(o.material)?initial:initial[0];}});const box=new THREE.Box3().setFromObject(root);const size=box.getSize(new THREE.Vector3());const center=box.getCenter(new THREE.Vector3());root.position.sub(center);const maxDim=Math.max(size.x,size.y,size.z);camera.position.set(maxDim*1.8,maxDim*1.2,maxDim*2.2);camera.near=maxDim/1000;camera.far=maxDim*100;camera.updateProjectionMatrix();controls.target.set(0,0,0);controls.update();if(!polyMeshes.length){status.textContent='Model loaded, but no glass_clear material was found';}else{status.textContent=`Loaded · ${polyMeshes.length} polycarbonate mesh(es)`;}loading.style.display='none';setFinish('clear');},xhr=>{if(xhr.total)status.textContent=`Loading ${Math.round(xhr.loaded/xhr.total*100)}%`;},err=>{loading.textContent='Could not load GLB. Run this folder from a local web server or GitHub Pages.';status.textContent='Model loading failed';console.error(err);});
 function resize(){const w=holder.clientWidth,h=holder.clientHeight;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h);}new ResizeObserver(resize).observe(holder);
 function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera);}animate();
 </script></body></html>
