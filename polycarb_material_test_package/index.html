@@ -39,12 +39,37 @@ let root=null, polyMeshes=[];
 const presets={
  clear:{label:'Clear',color:0xffffff,transmission:1,roughness:.05,ior:1.5,thickness:.08,attenuationColor:0xffffff,attenuationDistance:10,metalness:0},
  opaque:{label:'Opaque',color:0xf4f4f0,transmission:0,roughness:.88,ior:1.5,thickness:0,metalness:0},
- grey:{label:'Grey · RAL 7024',color:0x474a51,transmission:.42,roughness:.28,ior:1.5,thickness:.08,attenuationColor:0x474a51,attenuationDistance:1.8,metalness:0},
+ grey:{label:'Grey · RAL 7024 (lighter)',color:0x858991,transmission:.52,roughness:.32,ior:1.5,thickness:.08,attenuationColor:0x737984,attenuationDistance:2.2,metalness:0},
  cream:{label:'Cream · RAL 9001',color:0xe7e1d3,transmission:.48,roughness:.38,ior:1.5,thickness:.08,attenuationColor:0xe7e1d3,attenuationDistance:2.2,metalness:0},
  solar:{label:'Solar',color:0xe2e5e5,transmission:.68,roughness:.48,ior:1.5,thickness:.12,attenuationColor:0xd7dce0,attenuationDistance:.65,metalness:0}
 };
 function makeMaterial(p){return new THREE.MeshPhysicalMaterial({color:p.color,metalness:p.metalness,roughness:p.roughness,transmission:p.transmission,ior:p.ior,thickness:p.thickness,attenuationColor:p.attenuationColor??0xffffff,attenuationDistance:p.attenuationDistance??10,side:THREE.DoubleSide,transparent:p.transmission>0,opacity:1,depthWrite:p.transmission===0});}
-const mats={};for(const [k,p] of Object.entries(presets))mats[k]=makeMaterial(p);
+// Procedural fine vertical fluting for the polycarbonate surface.
+// Generated in the browser; no additional texture image is required.
+function makeVerticalFluteTexture(){
+  const canvas=document.createElement('canvas'); canvas.width=512; canvas.height=512;
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle='#888888'; ctx.fillRect(0,0,512,512);
+  for(let x=0;x<512;x+=16){
+    ctx.fillStyle='#b8b8b8'; ctx.fillRect(x,0,5,512);
+    ctx.fillStyle='#555555'; ctx.fillRect(x+6,0,3,512);
+    ctx.fillStyle='#858585'; ctx.fillRect(x+9,0,7,512);
+  }
+  const tex=new THREE.CanvasTexture(canvas);
+  tex.wrapS=THREE.RepeatWrapping; tex.wrapT=THREE.RepeatWrapping;
+  tex.colorSpace=THREE.NoColorSpace;
+  tex.anisotropy=renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+const fluteTexture=makeVerticalFluteTexture();
+const mats={};
+for(const [k,p] of Object.entries(presets)){
+  mats[k]=makeMaterial(p);
+  mats[k].bumpMap=fluteTexture;
+  mats[k].bumpScale=k==='clear'?0.004:(k==='opaque'?0.012:0.009);
+  mats[k].roughnessMap=fluteTexture;
+  mats[k].needsUpdate=true;
+}
 function setFinish(key){const p=presets[key];for(const entry of polyMeshes){const next=entry.originalMaterials.slice();for(const index of entry.polyIndices)next[index]=mats[key];entry.mesh.material=entry.wasArray?next:next[0];}document.querySelectorAll('#buttons button').forEach(b=>b.classList.toggle('active',b.dataset.finish===key));document.getElementById('readout').innerHTML=`<b>${p.label}</b><br>Transmission: ${p.transmission.toFixed(2)} · Roughness: ${p.roughness.toFixed(2)} · IOR: ${p.ior.toFixed(1)}`;status.textContent=`Finish: ${p.label}`;}
 document.querySelectorAll('#buttons button').forEach(b=>b.addEventListener('click',()=>setFinish(b.dataset.finish)));
 new GLTFLoader().load('./polycarb_clear.glb',gltf=>{root=gltf.scene;scene.add(root);root.traverse(o=>{if(!o.isMesh)return;const originalMaterials=Array.isArray(o.material)?o.material.slice():[o.material];const polyIndices=[];originalMaterials.forEach((m,i)=>{if(m&&/glass_clear|polycarb/i.test(m.name))polyIndices.push(i);});if(polyIndices.length){polyMeshes.push({mesh:o,originalMaterials,polyIndices,wasArray:Array.isArray(o.material)});const initial=originalMaterials.slice();for(const index of polyIndices)initial[index]=mats.clear;o.material=Array.isArray(o.material)?initial:initial[0];}});const box=new THREE.Box3().setFromObject(root);const size=box.getSize(new THREE.Vector3());const center=box.getCenter(new THREE.Vector3());root.position.sub(center);const maxDim=Math.max(size.x,size.y,size.z);camera.position.set(maxDim*1.8,maxDim*1.2,maxDim*2.2);camera.near=maxDim/1000;camera.far=maxDim*100;camera.updateProjectionMatrix();controls.target.set(0,0,0);controls.update();if(!polyMeshes.length){status.textContent='Model loaded, but no glass_clear material was found';}else{status.textContent=`Loaded · ${polyMeshes.length} polycarbonate mesh(es)`;}loading.style.display='none';setFinish('clear');},xhr=>{if(xhr.total)status.textContent=`Loading ${Math.round(xhr.loaded/xhr.total*100)}%`;},err=>{loading.textContent='Could not load GLB. Run this folder from a local web server or GitHub Pages.';status.textContent='Model loading failed';console.error(err);});
