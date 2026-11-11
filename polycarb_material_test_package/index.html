@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Polycarbonate Material Test</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f3f5f7;color:#17212b;font:15px/1.45 Arial,sans-serif}.app{max-width:1180px;margin:0 auto;padding:24px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap}.top h1{font-size:24px;margin:0}.sub{color:#627080;margin:5px 0 18px}.layout{display:grid;grid-template-columns:minmax(0,1fr) 290px;gap:18px}.viewer{height:650px;background:linear-gradient(#dce6ed,#f8fafb);border:1px solid #d5dde4;border-radius:14px;overflow:hidden;position:relative}.viewer canvas{display:block;width:100%;height:100%}.panel{background:#fff;border:1px solid #d5dde4;border-radius:14px;padding:18px}.panel h2{font-size:17px;margin:0 0 12px}.buttons{display:grid;gap:9px}.buttons button{padding:12px 14px;border:1px solid #cbd5df;border-radius:9px;background:#fff;text-align:left;font-weight:600;color:#243342;cursor:pointer}.buttons button.active{background:#203b4c;color:#fff;border-color:#203b4c}.swatch{display:inline-block;width:13px;height:13px;border-radius:50%;vertical-align:-2px;margin-right:9px;border:1px solid #9aa5af}.readout{margin-top:16px;padding:12px;background:#f1f4f6;border-radius:9px;color:#42515e;font-size:13px}.status{position:absolute;left:14px;bottom:12px;padding:7px 10px;background:#ffffffd9;border-radius:7px;font-size:12px;color:#52616e}.hint{font-size:12px;color:#71808d;margin-top:12px}.notice{margin-top:16px;padding:13px 15px;background:#fff8e8;border:1px solid #eed9a6;border-radius:10px;color:#72551c;font-size:13px}.loading{position:absolute;inset:0;display:grid;place-items:center;color:#53616e;background:#eaf0f4;z-index:2}@media(max-width:800px){.layout{grid-template-columns:1fr}.viewer{height:55vh;min-height:360px}.app{padding:14px}}
+</style>
+</head>
+<body><main class="app">
+<div class="top"><h1>Polycarbonate material test</h1><span id="modelName" class="sub">Nebbiolo sidewall · GLB test</span></div>
+<p class="sub">One sidewall model with five interchangeable material finishes. Drag to orbit, scroll to zoom.</p>
+<div class="layout"><section class="viewer"><div class="loading" id="loading">Loading sidewall model…</div><div class="status" id="status">Initialising viewer</div></section>
+<aside class="panel"><h2>Choose finish</h2><div class="buttons" id="buttons">
+<button data-finish="clear" class="active"><span class="swatch" style="background:#dce7ed"></span>Clear</button>
+<button data-finish="opaque"><span class="swatch" style="background:#f3f3ef"></span>Opaque</button>
+<button data-finish="grey"><span class="swatch" style="background:#474a51"></span>Grey · RAL 7024</button>
+<button data-finish="cream"><span class="swatch" style="background:#e7e1d3"></span>Cream · RAL 9001</button>
+<button data-finish="solar"><span class="swatch" style="background:#d7dce0"></span>Solar</button>
+</div><div class="readout" id="readout"><b>Clear</b><br>Existing GLB material, retained as the baseline.</div><p class="hint">The frame material is left unchanged. Only the glass/polycarbonate surface is replaced.</p></aside></div>
+<div class="notice"><b>Prototype note:</b> These are initial Three.js material presets, not calibrated matches to your V-Ray materials or physical samples. Transmission appearance depends on the environment and lighting. The opaque and solar values will need visual tuning against your reference photographs.</div>
+</main>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.1/build/three.module.js';
+import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/loaders/GLTFLoader.js';
+import { OrbitControls } from 'https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/controls/OrbitControls.js';
+import { RoomEnvironment } from 'https://cdn.jsdelivr.net/npm/three@0.160.1/examples/jsm/environments/RoomEnvironment.js';
+const holder=document.querySelector('.viewer'), status=document.getElementById('status'), loading=document.getElementById('loading');
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0xe7edf1);
+const camera=new THREE.PerspectiveCamera(38,holder.clientWidth/holder.clientHeight,.01,1000); camera.position.set(4,3,5);
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false}); renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(holder.clientWidth,holder.clientHeight); renderer.outputColorSpace=THREE.SRGBColorSpace; renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1; renderer.transmissionResolutionScale=1; holder.appendChild(renderer.domElement);
+const pmrem=new THREE.PMREMGenerator(renderer); scene.environment=pmrem.fromScene(new RoomEnvironment(),0.04).texture;
+scene.add(new THREE.HemisphereLight(0xffffff,0x9aa8b4,1.25)); const key=new THREE.DirectionalLight(0xffffff,2.1);key.position.set(4,7,5);scene.add(key);
+const controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=true;controls.target.set(0,1,0);
+let root=null, polyMeshes=[];
+const presets={
+ clear:{label:'Clear',color:0xffffff,transmission:1,roughness:.05,ior:1.5,thickness:.08,attenuationColor:0xffffff,attenuationDistance:10,metalness:0},
+ opaque:{label:'Opaque',color:0xf4f4f0,transmission:0,roughness:.88,ior:1.5,thickness:0,metalness:0},
+ grey:{label:'Grey · RAL 7024',color:0x474a51,transmission:.42,roughness:.28,ior:1.5,thickness:.08,attenuationColor:0x474a51,attenuationDistance:1.8,metalness:0},
+ cream:{label:'Cream · RAL 9001',color:0xe7e1d3,transmission:.48,roughness:.38,ior:1.5,thickness:.08,attenuationColor:0xe7e1d3,attenuationDistance:2.2,metalness:0},
+ solar:{label:'Solar',color:0xe2e5e5,transmission:.68,roughness:.48,ior:1.5,thickness:.12,attenuationColor:0xd7dce0,attenuationDistance:.65,metalness:0}
+};
+function makeMaterial(p){return new THREE.MeshPhysicalMaterial({color:p.color,metalness:p.metalness,roughness:p.roughness,transmission:p.transmission,ior:p.ior,thickness:p.thickness,attenuationColor:p.attenuationColor??0xffffff,attenuationDistance:p.attenuationDistance??10,side:THREE.DoubleSide,transparent:p.transmission>0,opacity:1,depthWrite:p.transmission===0});}
+const mats={};for(const [k,p] of Object.entries(presets))mats[k]=makeMaterial(p);
+function setFinish(key){const p=presets[key];for(const mesh of polyMeshes){if(Array.isArray(mesh.material)){mesh.material=mesh.material.map(m=>m.userData.isPolycarbonate?mats[key]:m)}else mesh.material=mats[key];}document.querySelectorAll('#buttons button').forEach(b=>b.classList.toggle('active',b.dataset.finish===key));document.getElementById('readout').innerHTML=`<b>${p.label}</b><br>Transmission: ${p.transmission.toFixed(2)} · Roughness: ${p.roughness.toFixed(2)} · IOR: ${p.ior.toFixed(1)}`;status.textContent=`Finish: ${p.label}`;}
+document.querySelectorAll('#buttons button').forEach(b=>b.addEventListener('click',()=>setFinish(b.dataset.finish)));
+new GLTFLoader().load('./polycarb_clear.glb',gltf=>{root=gltf.scene;scene.add(root);root.traverse(o=>{if(!o.isMesh)return;const mats0=Array.isArray(o.material)?o.material:[o.material];let found=false;const replaced=mats0.map(m=>{if(m&&/glass_clear|polycarb/i.test(m.name)){found=true;return mats.clear;}return m;});if(found){polyMeshes.push(o);o.material=Array.isArray(o.material)?replaced:replaced[0];}});const box=new THREE.Box3().setFromObject(root);const size=box.getSize(new THREE.Vector3());const center=box.getCenter(new THREE.Vector3());root.position.sub(center);const maxDim=Math.max(size.x,size.y,size.z);camera.position.set(maxDim*1.8,maxDim*1.2,maxDim*2.2);camera.near=maxDim/1000;camera.far=maxDim*100;camera.updateProjectionMatrix();controls.target.set(0,0,0);controls.update();if(!polyMeshes.length){status.textContent='Model loaded, but no glass_clear material was found';}else{status.textContent=`Loaded · ${polyMeshes.length} polycarbonate mesh(es)`;}loading.style.display='none';setFinish('clear');},xhr=>{if(xhr.total)status.textContent=`Loading ${Math.round(xhr.loaded/xhr.total*100)}%`;},err=>{loading.textContent='Could not load GLB. Run this folder from a local web server or GitHub Pages.';status.textContent='Model loading failed';console.error(err);});
+function resize(){const w=holder.clientWidth,h=holder.clientHeight;camera.aspect=w/h;camera.updateProjectionMatrix();renderer.setSize(w,h);}new ResizeObserver(resize).observe(holder);
+function animate(){requestAnimationFrame(animate);controls.update();renderer.render(scene,camera);}animate();
+</script></body></html>
